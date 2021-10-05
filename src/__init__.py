@@ -2,10 +2,11 @@ import pygame
 import random
 from pygame import Vector2
 
-from src.util import circle_collide_rect
+from src.util import circle_collide_rect, draw_hp
 from src.util import draw_circle
 
 from .unit import Unit
+from .unit import Infantry
 from .gui import GUI
 
 pygame.init()
@@ -17,7 +18,7 @@ class Options:
         self.show_grid = False
         self.show_path = False
         self.show_health = False
-        self.show_perception = False
+        self.show_range = False
 
 
 class Game:
@@ -27,16 +28,13 @@ class Game:
         self.scr = pygame.Surface(self.screen_size)
         self.win = pygame.display.set_mode(
             list(map(int, self.screen_size*self.scale)))
+        pygame.display.set_caption('micro capture')
         self.clock = pygame.time.Clock()
 
         self.selection = None
         self.select_start = None
 
-        self.units = [
-            Unit((self.screen_size//4)*3),
-            Unit((self.screen_size//4), faction=1)
-        ]
-        self.units[1].set_defensive_state()
+        self.units = []
 
         self.selected_units = []
 
@@ -64,13 +62,18 @@ class Game:
         self.grid.clear()
         self.grid.add_all(self.units)
 
-        [unit.update(dt, others=self.grid.query_circle(unit.pos, unit.perception))
-         for unit in self.units]
-        [unit.update(dt, others=self.units) for unit in self.units]
+        for unit in self.units:
+            unit.separation(self.grid.query_circle(
+                unit.pos, unit.size + unit.size/2))
+            unit.find_target(self.grid.query_circle(
+                unit.pos, unit.weapon.range))
+            unit.update(dt)
+            unit.restrict_to_surface(self.scr)
+
         [building.update(dt) for building in self.buildings]
-        self.units[:] = [unit for unit in self.units if unit.alive]
-        self.selected_units[:] = [unit for unit in self.selected_units
-                                  if unit.alive]
+        self.units = [unit for unit in self.units if unit.alive]
+        self.selected_units = [unit for unit in self.selected_units
+                               if unit.alive]
 
     def process_events(self, event) -> None:
         if (event.type == pygame.QUIT or
@@ -82,15 +85,24 @@ class Game:
         self.process_mouse_events(event)
 
     def process_key_events(self, event) -> None:
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_SPACE:
-                rpos = Vector2(random.random()-0.5, random.random()-0.5)
-                self.units.append(Unit(((self.screen_size//4)*3)+rpos))
-            if event.key == pygame.K_e:
-                rpos = Vector2(random.random()-0.5, random.random()-0.5)
-                self.units.append(Unit((self.screen_size//4)+rpos, faction=1))
-            elif event.key == pygame.K_g:
-                [unit.set_guard_mode() for unit in self.selected_units]
+        # if event.type == pygame.KEYDOWN:
+        #     pass
+
+        keys = pygame.key.get_pressed()
+        rpos = Vector2(random.random()-0.5, random.random()-0.5)
+        if keys[pygame.K_1]:
+            pos = Vector2(60, 60) + rpos
+            self.units.append(Infantry(pos, faction=0))
+        if keys[pygame.K_2]:
+            pos = Vector2(self.screen_size.x - 60, 60) + rpos
+            self.units.append(Infantry(pos, faction=1))
+        if keys[pygame.K_3]:
+            pos = Vector2(self.screen_size.x - 60,
+                          self.screen_size.y - 60) + rpos
+            self.units.append(Infantry(pos, faction=2))
+        if keys[pygame.K_4]:
+            pos = Vector2(60, self.screen_size.y - 60) + rpos
+            self.units.append(Infantry(pos, faction=3))
 
     def process_mouse_events(self, event) -> None:
         mpos = Vector2(pygame.mouse.get_pos())/self.scale
@@ -105,7 +117,9 @@ class Game:
 
         elif event.type == pygame.MOUSEBUTTONUP:
             if event.button == 1:
-                if unit := self.get_unit_at(mpos):
+                dist = self.select_start.distance_to(mpos)
+                unit = self.get_unit_at(mpos)
+                if dist <= 1 and unit:
                     self.selected_units = [unit]
                 self.select_start = None
                 self.selection = None
@@ -145,7 +159,11 @@ class Game:
             for unit in self.selected_units if unit.move_target]
 
         # draw the unit trails
-        [t.draw(self.scr) for u in self.units for t in u.trails]
+        # [t.draw(self.scr) for u in self.units for t in u.trails]
+
+        # draw the selection rings
+        [draw_circle(self.scr, (0, 200, 0, 100), unit.pos, unit.size+2, 1)
+            for unit in self.selected_units]
 
         # draw the units
         [unit.draw(self.scr) for unit in self.units]
@@ -153,21 +171,21 @@ class Game:
         # draw the buildings
         [building.draw(self.scr) for building in self.buildings]
 
-        # draw the selection rings
-        [draw_circle(self.scr, (0, 200, 0, 100), unit.pos, unit.size+4, 1)
-            for unit in self.selected_units]
-
-        # draw the perception rings
-        if self.options.show_perception:
+        # draw the range rings
+        if self.options.show_range:
             for unit in self.units:
-                pygame.draw.circle(
-                    self.scr, (0, 0, 100),
+                draw_circle(
+                    self.scr, (0, 0, 100, 10),
                     unit.pos,
-                    unit.perception, 1)
+                    unit.weapon.range, 1)
 
         # draw the hp bars
         if self.options.show_health:
-            [unit.draw_hp(self.scr) for unit in self.units]
+            [draw_hp(surface=self.scr,
+                     pos=Vector2(unit.pos.x, unit.pos.y - 4),
+                     size=Vector2(8, 3),
+                     pct=unit.health/unit.max_health)
+             for unit in self.units]
 
         # draw the selection rect
         if self.selection:
@@ -221,10 +239,13 @@ class Grid:
 
     def query_circle(self, pos: Vector2, radius: float) -> list:
         objs = []
-        for x in range(int(pos.x-radius), int(pos.x+radius), int(self.cell_size.x)):
-            for y in range(int(pos.y-radius), int(pos.y+radius), int(self.cell_size.y)):
-                if circle_collide_rect(pos, radius, Vector2(x, y), self.cell_size):
-                    objs.extend(self.cells.get(self.to_key(Vector2(x, y)), []))
+        start_x = int((pos.x - radius)//self.cell_size.x)
+        start_y = int((pos.y - radius)//self.cell_size.y)
+        end_x = int((pos.x + radius)//self.cell_size.x)
+        end_y = int((pos.y + radius)//self.cell_size.y)
+        for x in range(start_x, end_x+1):
+            for y in range(start_y, end_y+1):
+                objs.extend(self.cells.get((x, y), []))
         return objs
 
     # draw each cell as a rectangle
