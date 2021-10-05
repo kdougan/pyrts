@@ -16,9 +16,9 @@ class GUI:
             text='+ Health' if not self.game.options.show_health else '- Health',
             manager=self.manager
         )
-        self.show_perception_button = pygame_gui.elements.UIButton(
+        self.show_range_button = pygame_gui.elements.UIButton(
             relative_rect=Rect(Vector2(10, 40), Vector2(100, 20)),
-            text='+ Percep' if not self.game.options.show_perception else '- Percep',
+            text='+ Range' if not self.game.options.show_range else '- Range',
             manager=self.manager
         )
 
@@ -34,10 +34,10 @@ class GUI:
                 self.game.options.show_health = not self.game.options.show_health
                 self.show_health_button.set_text(
                     '+ Health' if not self.game.options.show_health else '- Health')
-            elif event.ui_element == self.show_perception_button:
-                self.game.options.show_perception = not self.game.options.show_perception
-                self.show_perception_button.set_text(
-                    '+ Percep' if not self.game.options.show_perception else '- Percep')
+            elif event.ui_element == self.show_range_button:
+                self.game.options.show_range = not self.game.options.show_range
+                self.show_range_button.set_text(
+                    '+ Range' if not self.game.options.show_range else '- Range')
 
         self.manager.process_events(event)
 
